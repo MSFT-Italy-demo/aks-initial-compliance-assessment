@@ -1,4 +1,5 @@
 Checks implemented
+
 Security:
 - Cluster must be private
 - Public FQDN should be disabled
