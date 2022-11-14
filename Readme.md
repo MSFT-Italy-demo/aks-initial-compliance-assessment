@@ -39,7 +39,8 @@ Login to the Azure CLI and execute the script
 ```powershell
 az login # -t [tenant id] (optional)
 
-.\ClusterAssessment.ps1 #-Path "C:\MyPath" -csvDelimiter "," (optional) 
+# Optionally specify the output path and the CSV Delimiter as argument
+.\ClusterAssessment.ps1 #-Path "C:\MyPath" -csvDelimiter ","
 
 ```
 
