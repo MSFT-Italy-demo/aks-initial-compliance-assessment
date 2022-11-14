@@ -39,7 +39,7 @@ function Start-AKSClusterAssessment {
         Write-Host "***** Assessing the subscription $($currentSubscription.displayName) ($($currentSubscription.id)..." -ForegroundColor Green
         az account set -s $currentSubscription.SubscriptionId
 
-        $aksClusters = az aks list -g aks-antipattern | ConvertFrom-Json
+        $aksClusters = az aks list | ConvertFrom-Json
         foreach ($currentAKSCluster in $aksClusters) {
             Write-Host "**** Assessing the AKS Cluster $($currentAKSCluster.Name)..." -ForegroundColor Blue
 
