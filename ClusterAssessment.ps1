@@ -27,7 +27,8 @@ class AKSClusterResult {
     [string]$SystemAndUserNodePool
     [string]$AvailabilityZones
     [string]$UptimeSlaConfiguration
-    [String]$ObsoletePodIdentity
+    [string]$CurrentNodepoolCount
+    [string]$CurrentTotalNodeCount
     [string]$ErrorMessage
 }
 
@@ -39,7 +40,7 @@ function Start-AKSClusterAssessment {
         Write-Host "***** Assessing the subscription $($currentSubscription.displayName) ($($currentSubscription.id)..." -ForegroundColor Green
         az account set -s $currentSubscription.SubscriptionId
 
-        $aksClusters = az aks list | ConvertFrom-Json
+        $aksClusters = az aks list  | ConvertFrom-Json
         foreach ($currentAKSCluster in $aksClusters) {
             Write-Host "**** Assessing the AKS Cluster $($currentAKSCluster.Name)..." -ForegroundColor Blue
 
@@ -52,6 +53,8 @@ function Start-AKSClusterAssessment {
                 $aksResult.ProvisioningState = $currentAKSCluster.provisioningState
                 $aksResult.Region = $currentAKSCluster.location
                 $aksResult.ManagedResourceGroup = $currentAKSCluster.nodeResourceGroup
+                $aksResult.CurrentNodepoolCount = $currentAKSCluster.agentPoolProfiles.Length
+                $aksResult.CurrentTotalNodeCount = GetTotalNodeCount($currentAKSCluster)
                 
                 #Private cluster should be enabled and public FQDN disabled
                 $aksResult.PrivateCluster = $(if ([string]::IsNullOrEmpty($currentAKSCluster.apiServerAccessProfile.enablePrivateCluster)) { $koMessage } else {$okMessage})
@@ -144,6 +147,20 @@ function CheckKubernetesControlPlaneVersion {
     }
 
     return $result
+}
+
+function GetTotalNodeCount(){
+    Param(
+        [Parameter(Mandatory = $true)]$cluster
+    )
+
+    $totalNodeCount = 0
+
+    foreach($nodePool in $cluster.agentPoolProfiles){
+        $totalNodeCount += $nodePool.count
+    }
+
+    return $totalNodeCount;
 }
 
 function Get-Compliancy {
