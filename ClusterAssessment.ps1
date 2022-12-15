@@ -16,9 +16,14 @@ class AKSClusterResult {
     [string]$ManagedResourceGroup
     [string]$PrivateCluster
     [string]$PrivateClusterPublicFqdn
+    [string]$LoadBalancerWithoutPublicIp
+    [string]$NodePoolSubnetWithNSG
+    [string]$NetworkPolicyAzureCalico
     [string]$IsKubernetesVersionSupported
     [string]$ContainerInsights
+    [string]$DiagnosticSettings
     [string]$UserAssignedIdentity
+    [string]$PodIdentityDeprecated
     [string]$MicrosoftDefender
     [string]$RBAC
     [string]$AzureADIntegration
@@ -28,7 +33,7 @@ class AKSClusterResult {
     [string]$AvailabilityZones
     [string]$UptimeSlaConfiguration
     [string]$CurrentNodepoolCount
-    [string]$CurrentTotalNodeCount
+    [string]$CurrentTotalNodeCount    
     [string]$ErrorMessage
 }
 
@@ -44,6 +49,8 @@ function Start-AKSClusterAssessment {
         foreach ($currentAKSCluster in $aksClusters) {
             Write-Host "**** Assessing the AKS Cluster $($currentAKSCluster.Name)..." -ForegroundColor Blue
 
+            
+
             $aksResult = [AKSClusterResult]::new()
 
             try {
@@ -57,24 +64,29 @@ function Start-AKSClusterAssessment {
                 $aksResult.CurrentTotalNodeCount = GetTotalNodeCount($currentAKSCluster)
                 
                 #Private cluster should be enabled and public FQDN disabled
-                $aksResult.PrivateCluster = $(if ([string]::IsNullOrEmpty($currentAKSCluster.apiServerAccessProfile.enablePrivateCluster)) { $koMessage } else {$okMessage})
-                $aksResult.PrivateClusterPublicFqdn =  $(if ([string]::IsNullOrEmpty($currentAKSCluster.privateFqdn))  { $koMessage } else {$okMessage})
+                $aksResult.PrivateCluster = $(if ([string]::IsNullOrEmpty($currentAKSCluster.apiServerAccessProfile.enablePrivateCluster)) { $koMessage } else { $okMessage })
+                $aksResult.PrivateClusterPublicFqdn =  $(if ([string]::IsNullOrEmpty($currentAKSCluster.privateFqdn))  { $koMessage } else { $okMessage })
+                $aksResult.LoadBalancerWithoutPublicIp = if($currentAKSCluster.networkProfile.loadBalancerProfile.effectiveOutboundIPs.count -gt 0) { $koMessage } else { $okMessage }
+                $aksResult.NodePoolSubnetWithNSG = CheckNodePoolSubnetsHasNSG($currentAKSCluster.agentPoolProfiles)
+                $aksResult.NetworkPolicyAzureCalico = if(($currentAKSCluster.networkProfile.networkPolicy -eq "azure") -or ($currentAKSCluster.networkProfile.networkPolicy -eq "calico")) { $okMessage } else { $koMessage }
 
                 #RBAC should be enabled and azure ad used for authentication, cluster identity should be managed identity 
-                $aksResult.RBAC = $(if ($currentAKSCluster.enableRbac) {$okMessage} else {$koMessage})
-                $aksResult.AzureADIntegration = $(if ([string]::IsNullOrEmpty($currentAKSCluster.aadProfile)) { $koMessage} else {$okMessage})
-                $aksResult.UserAssignedIdentity = $(if ($currentAKSCluster.identity.type -eq "UserAssigned" -or $currentAKSCluster.identity.type -eq "SystemAssigned") {   $okMessage } else {$koMessage})
+                $aksResult.RBAC = $(if ($currentAKSCluster.enableRbac) { $okMessage } else { $koMessage })
+                $aksResult.AzureADIntegration = $(if ([string]::IsNullOrEmpty($currentAKSCluster.aadProfile)) { $koMessage } else { $okMessage })
+                $aksResult.UserAssignedIdentity = $(if ($currentAKSCluster.identity.type -eq "UserAssigned" -or $currentAKSCluster.identity.type -eq "SystemAssigned") { $okMessage } else { $koMessage })
+                $aksResult.PodIdentityDeprecated = $(if ([string]::IsNullOrEmpty($currentAKSCluster.podIdentityProfile)) { $okMessage } else { $koMessage })
 
                 #Observability, Compliance and security features
-                $aksResult.ContainerInsights = $(if ($currentAKSCluster.addonProfiles.omsagent.enabled) {$okMessage} else {$koMessage}) 
-                $aksResult.MicrosoftDefender = $(if([string]::IsNullOrEmpty($currentAKSCluster.securityProfile.defender)) { $koMessage } else {$okMessage})
-                $aksResult.KMSConfigured = $(if ([string]::IsNullOrEmpty($currentAKSCluster.securityProfile.azureKeyVaultKms)){$koMessage}else {$okMessage})
-                $aksResult.AzurePolicy = $(if ($currentAKSCluster.addonProfiles.azurepolicy.Enabled) {$okMessage}else {$koMessage})
+                $aksResult.ContainerInsights = $(if ($currentAKSCluster.addonProfiles.omsagent.enabled) { $okMessage } else { $koMessage }) 
+                $aksResult.DiagnosticSettings = CheckDiagnosticSettings($currentAKSCluster)
+                $aksResult.MicrosoftDefender = $(if([string]::IsNullOrEmpty($currentAKSCluster.securityProfile.defender)) { $koMessage } else { $okMessage })
+                $aksResult.KMSConfigured = $(if ([string]::IsNullOrEmpty($currentAKSCluster.securityProfile.azureKeyVaultKms)){ $koMessage } else { $okMessage })
+                $aksResult.AzurePolicy = $(if ($currentAKSCluster.addonProfiles.azurepolicy.Enabled) { $okMessage } else { $koMessage })
 
                 #High availability (control plane, node pools, uptime sla)                
                 $aksResult.AvailabilityZones = CheckAvailabilityZones($currentAKSCluster.agentPoolProfiles)
                 $aksResult.SystemAndUserNodePool = CheckNodepoolsSpecification($currentAKSCluster.agentPoolProfiles)
-                $aksResult.UptimeSlaConfiguration = $(if ( $currentAKSCluster.sku.tier -eq "Free") {$koMessage} else {$okMessage})
+                $aksResult.UptimeSlaConfiguration = $(if ( $currentAKSCluster.sku.tier -eq "Free") { $koMessage } else { $okMessage })
                                 
                 #Cluster and nodepool version should not lag x versions behind the default
                 $aksResult.IsKubernetesVersionSupported = CheckKubernetesControlPlaneVersion($currentAKSCluster)
@@ -92,6 +104,35 @@ function Start-AKSClusterAssessment {
             Export-AKSClusterResult $aksResult
         }
     }
+}
+
+function CheckNodePoolSubnetsHasNSG {    
+    Param(
+        [Parameter(Mandatory = $true)]$agentPoolProfiles
+    )   
+
+    foreach ($agentProfile in $agentPoolProfiles) {
+        if($agentProfile.vnetSubnetId) {
+            $subnet = az network vnet subnet show --ids $agentProfile.vnetSubnetId | ConvertFrom-Json
+            if(-not $subnet.networkSecurityGroup) {
+                return $koMessage
+            }
+        } else {
+            return $koMessage
+        } 
+    }
+    return $okMessage;
+}
+
+function CheckDiagnosticSettings {
+    Param(
+        [Parameter(Mandatory = $true)]$cluster
+    )  
+    $diagnosticSettings = az monitor diagnostic-settings list --resource $cluster.id | ConvertFrom-Json
+    if($diagnosticSettings) { 
+        return $okMessage 
+    } 
+    return $koMessage;
 }
 
 
@@ -169,8 +210,13 @@ function Get-Compliancy {
     )   
     if ($clusterResult.IsKubernetesVersionSupported -ne "" -or
         $clusterResult.PrivateCluster -eq $koMessage -or
+        $clusterResult.LoadBalancerWithoutPublicIp -eq $koMessage -or
+        $clusterResult.NodePoolSubnetWithNSG -eq $koMessage -or
+        $clusterResult.NetworkPolicyAzureCalico -eq $koMessage -or
         $clusterResult.ContainerInsights -eq $koMessage -or 
+        $clusterResult.DiagnosticSettings -eq $koMessage -or
         $clusterResult.UserAssignedIdentity -eq $koMessage -or
+        $clusterResult.PodIdentityDeprecated -eq $koMessage -or
         $clusterResult.MicrosoftDefender -eq $koMessage -or
         $clusterResult.EnableRBAC -eq $koMessage -or
         $clusterResult.KMSConfigured -eq $koMessage -or
