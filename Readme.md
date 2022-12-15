@@ -27,7 +27,7 @@
 
 ## Prerequisites
 - Windows PowerShell 5+ / PowerShell Core 7
-- Aure CLI 
+- Azure CLI 
 
 ## Permissions
 In order to complete the assessment, the user must have at least Reader permission/role over the Azure Kubernetes Service resources
