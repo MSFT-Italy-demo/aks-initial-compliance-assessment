@@ -28,6 +28,7 @@
 ## Prerequisites
 - Windows PowerShell 5+ / PowerShell Core 7
 - Azure CLI 
+- "account" extension installed on Azure CLI: `az extension add --name account`
 
 ## Permissions
 In order to complete the assessment, the user must have at least Reader permission/role over the Azure Kubernetes Service resources
